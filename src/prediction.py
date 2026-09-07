@@ -6,44 +6,129 @@ from .scoring import (
     pair_scores,
     triple_scores,
     delta_scores,
-    learning_scores
+    neighbor_scores,
+    learning_scores,
 )
 
 
-def get_weights(state):
-    history = state.get("history", [])
+METHODS = (
+    'frequency',
+    'recency',
+    'gap',
+    'transition',
+    'pair',
+    'triple',
+    'delta',
+    'neighbor',
+    'learning',
+)
 
-    weights = {
-        "frequency": 1.0,
-        "recency": 0.8,
-        "gap": 0.25,
-        "transition": 1.8,
-        "pair": 2.5,
-        "triple": 3.0,
-        "delta": 1.0,
-        "learning": 2.0,
-    }
 
-    if len(history) < 5:
-        return weights
+BASE_WEIGHTS = {
+    'frequency': 1.00,
+    'recency': 1.10,
+    'gap': 0.20,
+    'transition': 1.80,
+    'pair': 2.20,
+    'triple': 2.40,
+    'delta': 0.90,
+    'neighbor': 0.80,
+    'learning': 1.50,
+}
 
-    correct = 0
-    total = 0
 
-    for item in history[-50:]:
-        total += 1
+VALIDATION_WINDOW = 60
+MIN_VALIDATION_TRAIN = 8
 
-        if item.get("prediction") == item.get("actual"):
-            correct += 1
 
-    if total:
-        accuracy = correct / total
+def get_weights(state, min_value, max_value):
+    data = state.get('data', [])
 
-        weights["learning"] *= (
-            0.5 + accuracy
+    reliability = evaluate_methods(
+        data,
+        min_value,
+        max_value
+    )
+
+    weights = {}
+
+    for method in METHODS:
+        score = reliability.get(method, 0.50)
+
+        weights[method] = (
+            BASE_WEIGHTS[method]
+            *
+            (0.35 + score) ** 1.25
         )
 
-    return weights
+    total = sum(weights.values())
+    base_total = sum(BASE_WEIGHTS.values())
+
+    if total > 0:
+        factor = base_total / total
+
+        weights = {
+            method: value * factor
+            for method, value in weights.items()
+        }
+
+    return weights, reliability
+
+
+def calculate_method_scores(
+    data,
+    min_value,
+    max_value
+):
+    return {
+        'frequency': frequency_scores(
+            data,
+            min_value,
+            max_value
+        ),
+
+        'recency': recency_scores(
+            data,
+            min_value,
+            max_value
+        ),
+
+        'gap': gap_scores(
+            data,
+            min_value,
+            max_value
+        ),
+
+        'transition': transition_scores(
+            data,
+            min_value,
+            max_value
+        ),
+
+        'pair': pair_scores(
+            data,
+            min_value,
+            max_value
+        ),
+
+        'triple': triple_scores(
+            data,
+            min_value,
+            max_value
+        ),
+
+        'delta': delta_scores(
+            data,
+            min_value,
+            max_value
+        ),
+
+        'neighbor': neighbor_scores(
+            data,
+            min_value,
+            max_value
+        ),
+    }
 
 
 def calculate_scores(
@@ -51,139 +136,267 @@ def calculate_scores(
     min_value,
     max_value
 ):
-    data = state["data"]
+    data = state.get('data', [])
 
     if not data:
-        return {}
+        return {}, {}, {}
 
-    weights = get_weights(state)
-
-    methods = {
-        "frequency": frequency_scores(
-            data, min_value, max_value
-        ),
-
-        "recency": recency_scores(
-            data, min_value, max_value
-        ),
-
-        "gap": gap_scores(
-            data, min_value, max_value
-        ),
-
-        "transition": transition_scores(
-            data, min_value, max_value
-        ),
-
-        "pair": pair_scores(
-            data, min_value, max_value
-        ),
-
-        "triple": triple_scores(
-            data, min_value, max_value
-        ),
-
-        "delta": delta_scores(
-            data, min_value, max_value
-        ),
-
-        "learning": learning_scores(
-            state, min_value, max_value
-        ),
-    }
-
-    final = {
-        value: 0.0
-        for value in range(min_value, max_value + 1)
-    }
-
-    for method, scores in methods.items():
-        weight = weights[method]
-
-        for value in final:
-            final[value] += (
-                scores.get(value, 0)
-                * weight
-            )
-
-    return final
-
-
-def predict(state, min_value, max_value):
-    scores = calculate_scores(
+    weights, reliability = get_weights(
         state,
         min_value,
         max_value
     )
 
-    return sorted(
-        scores.items(),
-        key=lambda x: x[1],
-        reverse=True
+    methods = calculate_method_scores(
+        data,
+        min_value,
+        max_value
     )
+
+    methods['learning'] = learning_scores(
+        state,
+        min_value,
+        max_value
+    )
+
+    final = {
+        value: 0.0
+        for value in range(
+            min_value,
+            max_value + 1
+        )
+    }
+
+    for method in METHODS:
+        weight = weights[method]
+        scores = methods[method]
+
+        for value in final:
+            final[value] += (
+                weight
+                *
+                scores.get(
+                    value,
+                    0.0
+                )
+            )
+
+    # Sedikit tie-break menggunakan frequency.
+    for value in final:
+        final[value] += (
+            0.05
+            *
+            methods['frequency'].get(
+                value,
+                0.0
+            )
+        )
+
+    return final, weights, reliability
+
+
+def evaluate_methods(
+    data,
+    min_value,
+    max_value
+):
+    reliability = {
+        method: 0.50
+        for method in METHODS
+    }
+
+    if len(data) <= MIN_VALIDATION_TRAIN:
+        return reliability
+
+    start = max(
+        MIN_VALIDATION_TRAIN,
+        len(data) - VALIDATION_WINDOW
+    )
+
+    hits = {
+        method: 0
+        for method in METHODS
+    }
+
+    trials = {
+        method: 0
+        for method in METHODS
+    }
+
+    for t in range(
+        start,
+        len(data)
+    ):
+        training = data[:t]
+        actual = data[t]
+
+        methods = calculate_method_scores(
+            training,
+            min_value,
+            max_value
+        )
+
+        for method in METHODS:
+
+            if method == 'learning':
+                continue
+
+            scores = methods[method]
+
+            if not scores:
+                continue
+
+            prediction = max(
+                scores,
+                key=scores.get
+            )
+
+            trials[method] += 1
+
+            if prediction == actual:
+                hits[method] += 1
+
+    for method in METHODS:
+
+        if method == 'learning':
+            continue
+
+        if trials[method] > 0:
+            reliability[method] = (
+                hits[method] + 1.0
+            ) / (
+                trials[method] + 2.0
+            )
+
+    return reliability
+
+
+def predict(
+    state,
+    min_value,
+    max_value
+):
+    scores, weights, reliability = calculate_scores(
+        state,
+        min_value,
+        max_value
+    )
+
+    ranking = sorted(
+        scores.items(),
+        key=lambda item: (
+            -item[1],
+            item[0]
+        )
+    )
+
+    return ranking
 
 
 def confidence(ranking):
-    if not ranking:
-        return 0
+    if len(ranking) < 2:
+        return 0.0
 
-    values = [
-        score
+    first = max(
+        0.0,
+        ranking[0][1]
+    )
+
+    second = max(
+        0.0,
+        ranking[1][1]
+    )
+
+    total = sum(
+        max(0.0, score)
         for _, score in ranking
-    ]
+    )
 
-    if len(values) < 2:
-        return 0
+    if total <= 0 or first <= 0:
+        return 0.0
 
-    maximum = values[0]
-    second = values[1]
+    concentration = (
+        first / total
+    )
 
-    if maximum <= 0:
-        return 0
+    margin = (
+        first - second
+    ) / first
 
-    gap = (
-        maximum - second
-    ) / maximum
+    value = (
+        100.0
+        *
+        (
+            0.60 * concentration
+            +
+            0.40 * max(
+                0.0,
+                margin
+            )
+        )
+    )
 
     return min(
-        100,
-        gap * 100
+        100.0,
+        max(0.0, value)
     )
 
 
-def show_prediction(state, ranking):
+def show_prediction(
+    state,
+    ranking
+):
     print()
-    print("=" * 65)
-    print(" PREDICTION ENGINE")
-    print("=" * 65)
+    print('=' * 72)
+    print(
+        ' PREDICTION ENGINE - ADAPTIVE ENSEMBLE'
+    )
+    print('=' * 72)
 
-    print("\nData tersimpan:")
-    print(state["data"])
+    print('\nData tersimpan:')
+    print(
+        state.get(
+            'data',
+            []
+        )
+    )
 
-    print("\nTOP PREDICTION")
-    print("-" * 65)
+    print('\nTOP PREDICTION')
+    print('-' * 72)
 
-    for i, (value, score) in enumerate(
+    for i, (
+        value,
+        score
+    ) in enumerate(
         ranking[:10],
         start=1
     ):
         print(
-            f"{i:2}. "
-            f"Nilai {value:2} "
-            f"Score {score:.6f}"
+            f'{i:2}. '
+            f'Nilai {value:2} '
+            f'| Score {score:.6f}'
         )
 
+    if not ranking:
+        print(
+            'Belum cukup data untuk prediksi.'
+        )
+        return
+
     prediction = ranking[0][0]
-    conf = confidence(ranking)
 
-    print("-" * 65)
+    conf = confidence(
+        ranking
+    )
+
+    print('-' * 72)
 
     print(
-        f"TEBAKAN MESIN : {prediction}"
+        f'TEBAKAN MESIN : {prediction}'
     )
 
     print(
-        f"CONFIDENCE     : {conf:.2f}%"
+        f'CONFIDENCE     : {conf:.2f}%'
     )
 
-    print("=" * 65)
+    print('=' * 72)
