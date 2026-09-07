@@ -1,0 +1,2 @@
+# prediksi
+Tebak nilai selanjutnya 
