@@ -6,97 +6,134 @@ from .scoring import (
     pair_scores,
     triple_scores,
     delta_scores,
+    learning_scores
 )
 
 from .tuning import (
     DEFAULT_WEIGHTS,
     MIN_BACKTEST_POINTS,
     RETUNE_INTERVAL,
-    tune_weights,
+    tune_weights
 )
 
 
-KECIL_MIN = 3
-KECIL_MAX = 10
-BESAR_MIN = 11
-BESAR_MAX = 18
-
-KECIL = 0
-BESAR = 1
-
-METHOD_FUNCS = {
-    "frequency": frequency_scores,
-    "recency": recency_scores,
-    "gap": gap_scores,
-    "transition": transition_scores,
-    "pair": pair_scores,
-    "triple": triple_scores,
-    "delta": delta_scores,
-}
-
-
-def to_label(value):
-    return KECIL if value <= KECIL_MAX else BESAR
-
-
-def label_name(label):
-    if label == KECIL:
-        return f"KECIL ({KECIL_MIN}-{KECIL_MAX})"
-
-    return f"BESAR ({BESAR_MIN}-{BESAR_MAX})"
-
-
-def get_range_weights(state):
+def get_weights(state, min_value, max_value):
     data = state.get("data", [])
-    labels = [to_label(v) for v in data]
+    history = state.get("history", [])
 
-    if len(labels) < MIN_BACKTEST_POINTS:
-        return dict(DEFAULT_WEIGHTS)
+    if len(data) < MIN_BACKTEST_POINTS:
+        # Belum cukup data buat backtest yang bisa dipercaya --
+        # pakai default sampai histori cukup panjang.
+        weights = dict(DEFAULT_WEIGHTS)
+    else:
+        tuned_at = state.get("tuned_at_len", -RETUNE_INTERVAL)
 
-    tuned_at = state.get("range_tuned_at_len", -RETUNE_INTERVAL)
+        needs_retune = (
+            "tuned_weights" not in state
+            or len(data) - tuned_at >= RETUNE_INTERVAL
+        )
 
-    needs_retune = (
-        "range_tuned_weights" not in state
-        or len(labels) - tuned_at >= RETUNE_INTERVAL
-    )
+        if needs_retune:
+            # Retune tiap RETUNE_INTERVAL data baru, bukan tiap
+            # tebakan, biar tetap ringan walau histori makin panjang.
+            state["tuned_weights"] = tune_weights(
+                data, min_value, max_value
+            )
+            state["tuned_at_len"] = len(data)
 
-    if needs_retune:
-        # Dites lewat mesin backtest yang sama, cuma domainnya
-        # cuma 2 label (0/1) jadi jauh lebih padat datanya
-        # dibanding domain 16 nilai.
-        state["range_tuned_weights"] = tune_weights(labels, 0, 1)
-        state["range_tuned_at_len"] = len(labels)
+        weights = dict(state["tuned_weights"])
 
-    return dict(state["range_tuned_weights"])
+    weights["learning"] = 2.0
+
+    if len(history) >= 5:
+        correct = 0
+        total = 0
+
+        for item in history[-50:]:
+            total += 1
+
+            if item.get("prediction") == item.get("actual"):
+                correct += 1
+
+        if total:
+            accuracy = correct / total
+
+            weights["learning"] *= (
+                0.5 + accuracy
+            )
+
+    return weights
 
 
-def calculate_range_scores(state):
-    data = state.get("data", [])
+def calculate_scores(
+    state,
+    min_value,
+    max_value
+):
+    data = state["data"]
 
     if not data:
         return {}
 
-    labels = [to_label(v) for v in data]
+    weights = get_weights(state, min_value, max_value)
 
-    weights = get_range_weights(state)
+    methods = {
+        "frequency": frequency_scores(
+            data, min_value, max_value
+        ),
 
-    scores = {KECIL: 0.0, BESAR: 0.0}
+        "recency": recency_scores(
+            data, min_value, max_value
+        ),
 
-    for method, func in METHOD_FUNCS.items():
-        method_scores = func(labels, 0, 1)
-        weight = weights.get(method, 0.0)
+        "gap": gap_scores(
+            data, min_value, max_value
+        ),
 
-        for label in scores:
-            scores[label] += method_scores.get(label, 0) * weight
+        "transition": transition_scores(
+            data, min_value, max_value
+        ),
 
-    return scores
+        "pair": pair_scores(
+            data, min_value, max_value
+        ),
+
+        "triple": triple_scores(
+            data, min_value, max_value
+        ),
+
+        "delta": delta_scores(
+            data, min_value, max_value
+        ),
+
+        "learning": learning_scores(
+            state, min_value, max_value
+        ),
+    }
+
+    final = {
+        value: 0.0
+        for value in range(min_value, max_value + 1)
+    }
+
+    for method, scores in methods.items():
+        weight = weights[method]
+
+        for value in final:
+            final[value] += (
+                scores.get(value, 0)
+                * weight
+            )
+
+    return final
 
 
-def predict_range(state):
-    scores = calculate_range_scores(state)
-
-    if not scores:
-        return None
+def predict(state, min_value, max_value):
+    scores = calculate_scores(
+        state,
+        min_value,
+        max_value
+    )
 
     return sorted(
         scores.items(),
@@ -105,40 +142,67 @@ def predict_range(state):
     )
 
 
-def range_confidence(ranking):
-    if not ranking or len(ranking) < 2:
+def confidence(ranking):
+    if not ranking:
         return 0
 
-    maximum = ranking[0][1]
-    second = ranking[1][1]
+    values = [
+        score
+        for _, score in ranking
+    ]
+
+    if len(values) < 2:
+        return 0
+
+    maximum = values[0]
+    second = values[1]
 
     if maximum <= 0:
         return 0
 
-    gap = (maximum - second) / maximum
+    gap = (
+        maximum - second
+    ) / maximum
 
-    return min(100, gap * 100)
+    return min(
+        100,
+        gap * 100
+    )
 
 
-def show_range_prediction(ranking):
-    if not ranking:
-        return
+def show_prediction(state, ranking):
+    print()
+    print("=" * 65)
+    print(" PREDICTION ENGINE")
+    print("=" * 65)
 
-    print("\nPREDIKSI RENTANG (BESAR / KECIL)")
+    print("\nData tersimpan:")
+    print(state["data"])
+
+    print("\nTOP PREDICTION")
     print("-" * 65)
 
-    for label, score in ranking:
+    for i, (value, score) in enumerate(
+        ranking[:10],
+        start=1
+    ):
         print(
-            f"  {label_name(label):<14} "
+            f"{i:2}. "
+            f"Nilai {value:2} "
             f"Score {score:.6f}"
         )
 
     prediction = ranking[0][0]
-    conf = range_confidence(ranking)
+    conf = confidence(ranking)
 
     print("-" * 65)
 
-    print(f"TEBAKAN RENTANG : {label_name(prediction)}")
-    print(f"CONFIDENCE      : {conf:.2f}%")
+    print(
+        f"TEBAKAN MESIN : {prediction}"
+    )
+
+    print(
+        f"CONFIDENCE     : {conf:.2f}%"
+    )
 
     print("=" * 65)
