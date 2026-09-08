@@ -1,86 +1,65 @@
 def show_statistics(state):
-    history = state.get(
-        'history',
-        []
-    )
+    history = state.get("history", [])
 
     if not history:
-        print(
-            '\nBelum ada histori.'
-        )
+        print("\nBelum ada histori.")
         return
 
-    total = len(
-        history
-    )
+    total = len(history)
 
     correct = sum(
         1
-        for item in history
-        if item.get(
-            'correct',
-            item.get('prediction')
-            ==
-            item.get('actual')
-        )
+        for x in history
+        if x["correct"]
     )
 
     accuracy = (
-        correct
-        /
-        total
-        *
-        100.0
-    )
-
-    recent = history[-20:]
-
-    recent_correct = sum(
-        1
-        for item in recent
-        if item.get(
-            'correct',
-            item.get('prediction')
-            ==
-            item.get('actual')
-        )
-    )
-
-    recent_accuracy = (
-        recent_correct
-        /
-        len(recent)
-        *
-        100.0
-        if recent
-        else 0.0
+        correct /
+        total *
+        100
     )
 
     print()
-    print('=' * 72)
-    print(' STATISTIK MESIN')
-    print('=' * 72)
+    print("=" * 65)
+    print(" STATISTIK MESIN")
+    print("=" * 65)
 
-    print(
-        f'Total prediksi       : {total}'
+    print(f"Total prediksi : {total}")
+    print(f"Benar         : {correct}")
+    print(f"Salah         : {total - correct}")
+    print(f"Akurasi       : {accuracy:.2f}%")
+
+    print("=" * 65)
+
+
+def show_range_statistics(state):
+    history = state.get("range_history", [])
+
+    if not history:
+        return
+
+    total = len(history)
+
+    correct = sum(
+        1
+        for x in history
+        if x["correct"]
     )
 
-    print(
-        f'Benar                : {correct}'
+    accuracy = (
+        correct /
+        total *
+        100
     )
 
-    print(
-        f'Salah                : {total - correct}'
-    )
+    print()
+    print("=" * 65)
+    print(" STATISTIK RENTANG (BESAR/KECIL)")
+    print("=" * 65)
 
-    print(
-        f'Akurasi total        : '
-        f'{accuracy:.2f}%'
-    )
+    print(f"Total prediksi : {total}")
+    print(f"Benar         : {correct}")
+    print(f"Salah         : {total - correct}")
+    print(f"Akurasi       : {accuracy:.2f}%")
 
-    print(
-        f'Akurasi 20 terakhir  : '
-        f'{recent_accuracy:.2f}%'
-    )
-
-    print('=' * 72)
+    print("=" * 65)
