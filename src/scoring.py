@@ -1,523 +1,254 @@
 from collections import Counter
 from statistics import mean
-import math
-
-
-def empty_scores(
-    min_value,
-    max_value
-):
-    return {
-        value: 0.0
-        for value in range(
-            min_value,
-            max_value + 1
-        )
-    }
 
 
 def normalize(scores):
     if not scores:
         return scores
 
-    minimum = min(
-        scores.values()
-    )
+    maximum = max(scores.values())
+    minimum = min(scores.values())
 
-    maximum = max(
-        scores.values()
-    )
+    difference = maximum - minimum
 
-    difference = (
-        maximum - minimum
-    )
-
-    if difference <= 0:
+    if difference == 0:
         return {
-            key: 1.0
-            for key in scores
+            k: 1.0
+            for k in scores
         }
 
     return {
-        key: (
-            value - minimum
-        ) / difference
+        k: (v - minimum) / difference
+        for k, v in scores.items()
+    }
+
+
+def confidence_scale(scores, total, k=4):
+    """
+    Kecilkan skor kalau pola yang mendasarinya cuma didukung
+    sedikit kejadian di histori (mis. konteks pair/triple yang
+    baru muncul 1-2 kali). Makin besar `total`, faktor makin
+    dekat ke 1.0 (skor dipakai penuh); makin kecil `total`,
+    makin dekat ke 0 (skor nyaris diabaikan karena cuma
+    kebetulan).
+    """
+    factor = total / (total + k)
+
+    return {
+        key: value * factor
         for key, value in scores.items()
     }
 
 
-def frequency_scores(
-    data,
-    min_value,
-    max_value
-):
-    scores = empty_scores(
-        min_value,
-        max_value
-    )
-
-    if not data:
-        return scores
-
+def frequency_scores(data, min_value, max_value):
     counter = Counter(data)
+    total = len(data)
 
-    alpha = 1.0
+    if total == 0:
+        return {
+            value: 0
+            for value in range(min_value, max_value + 1)
+        }
 
-    denominator = (
-        len(data)
-        +
-        alpha * len(scores)
-    )
+    scores = {}
 
-    for value in scores:
-        scores[value] = (
-            counter[value]
-            +
-            alpha
-        ) / denominator
+    for value in range(min_value, max_value + 1):
+        scores[value] = counter[value] / total
 
     return normalize(scores)
 
 
-def recency_scores(
-    data,
-    min_value,
-    max_value
-):
-    scores = empty_scores(
-        min_value,
-        max_value
-    )
+def recency_scores(data, min_value, max_value):
+    scores = {}
 
-    if not data:
-        return scores
+    for value in range(min_value, max_value + 1):
+        score = 0
 
-    decay = 0.90
-
-    for distance, value in enumerate(
-        reversed(data),
-        start=0
-    ):
-        scores[value] += (
-            decay ** distance
-        )
-
-        if distance >= 50:
-            break
-
-    return normalize(scores)
-
-
-def gap_scores(
-    data,
-    min_value,
-    max_value
-):
-    scores = empty_scores(
-        min_value,
-        max_value
-    )
-
-    if not data:
-        return scores
-
-    n = len(data)
-
-    for value in scores:
-
-        gap = n + 1
-
-        for distance, actual in enumerate(
+        for distance, x in enumerate(
             reversed(data),
             start=1
         ):
-            if actual == value:
-                gap = distance
+            if x == value:
+                score = 1 / distance
                 break
 
-        # Gap tidak boleh mendominasi metode lain.
-        scores[value] = math.log1p(gap)
+        scores[value] = score
 
     return normalize(scores)
 
 
-def transition_scores(
-    data,
-    min_value,
-    max_value
-):
-    scores = empty_scores(
-        min_value,
-        max_value
-    )
+def gap_scores(data, min_value, max_value):
+    scores = {}
+
+    for value in range(min_value, max_value + 1):
+        gap = len(data) + 1
+
+        for distance, x in enumerate(
+            reversed(data),
+            start=1
+        ):
+            if x == value:
+                gap = distance
+                break
+
+        scores[value] = gap
+
+    return normalize(scores)
+
+
+def transition_scores(data, min_value, max_value):
+    scores = {
+        value: 0
+        for value in range(min_value, max_value + 1)
+    }
 
     if len(data) < 2:
         return scores
 
     current = data[-1]
-
     counter = Counter()
 
-    total_weight = 0.0
+    for i in range(len(data) - 1):
+        if data[i] == current:
+            counter[data[i + 1]] += 1
 
-    decay = 0.94
+    total = sum(counter.values())
 
-    for i in range(
-        len(data) - 2,
-        -1,
-        -1
-    ):
-
-        if data[i] != current:
-            continue
-
-        distance = (
-            len(data) - 2
-        ) - i
-
-        weight = (
-            decay ** distance
-        )
-
-        counter[
-            data[i + 1]
-        ] += weight
-
-        total_weight += weight
-
-        if total_weight >= 15:
-            break
-
-    if total_weight <= 0:
+    if total == 0:
         return scores
 
-    alpha = 0.35
-
-    denominator = (
-        total_weight
-        +
-        alpha * len(scores)
-    )
-
     for value in scores:
-        scores[value] = (
-            counter[value]
-            +
-            alpha
-        ) / denominator
+        scores[value] = counter[value] / total
 
-    return normalize(scores)
+    scores = normalize(scores)
+
+    return confidence_scale(scores, total, k=3)
 
 
-def pair_scores(
-    data,
-    min_value,
-    max_value
-):
-    scores = empty_scores(
-        min_value,
-        max_value
-    )
+def pair_scores(data, min_value, max_value):
+    scores = {
+        value: 0
+        for value in range(min_value, max_value + 1)
+    }
 
     if len(data) < 3:
         return scores
 
-    pattern = tuple(
-        data[-2:]
-    )
+    a = data[-2]
+    b = data[-1]
 
     counter = Counter()
 
-    total_weight = 0.0
+    for i in range(2, len(data)):
+        if (
+            data[i - 2] == a
+            and data[i - 1] == b
+        ):
+            counter[data[i]] += 1
 
-    decay = 0.95
+    total = sum(counter.values())
 
-    for end in range(
-        2,
-        len(data)
-    ):
-        previous = tuple(
-            data[end - 2:end]
-        )
-
-        if previous != pattern:
-            continue
-
-        distance = (
-            len(data) - 1
-        ) - end
-
-        weight = (
-            decay ** distance
-        )
-
-        counter[
-            data[end]
-        ] += weight
-
-        total_weight += weight
-
-    if total_weight <= 0:
+    if total == 0:
         return scores
 
-    alpha = 0.30
-
-    denominator = (
-        total_weight
-        +
-        alpha * len(scores)
-    )
-
     for value in scores:
-        scores[value] = (
-            counter[value]
-            +
-            alpha
-        ) / denominator
+        scores[value] = counter[value] / total
 
-    return normalize(scores)
+    scores = normalize(scores)
+
+    return confidence_scale(scores, total, k=5)
 
 
-def triple_scores(
-    data,
-    min_value,
-    max_value
-):
-    scores = empty_scores(
-        min_value,
-        max_value
-    )
+def triple_scores(data, min_value, max_value):
+    scores = {
+        value: 0
+        for value in range(min_value, max_value + 1)
+    }
 
     if len(data) < 4:
         return scores
 
-    pattern = tuple(
-        data[-3:]
-    )
-
+    pattern = tuple(data[-3:])
     counter = Counter()
 
-    total_weight = 0.0
+    for i in range(3, len(data)):
+        previous = tuple(data[i - 3:i])
 
-    decay = 0.96
+        if previous == pattern:
+            counter[data[i]] += 1
 
-    for end in range(
-        3,
-        len(data)
-    ):
-        previous = tuple(
-            data[end - 3:end]
-        )
+    total = sum(counter.values())
 
-        if previous != pattern:
-            continue
-
-        distance = (
-            len(data) - 1
-        ) - end
-
-        weight = (
-            decay ** distance
-        )
-
-        counter[
-            data[end]
-        ] += weight
-
-        total_weight += weight
-
-    if total_weight <= 0:
+    if total == 0:
         return scores
 
-    alpha = 0.25
-
-    denominator = (
-        total_weight
-        +
-        alpha * len(scores)
-    )
-
     for value in scores:
-        scores[value] = (
-            counter[value]
-            +
-            alpha
-        ) / denominator
+        scores[value] = counter[value] / total
 
-    return normalize(scores)
+    scores = normalize(scores)
+
+    return confidence_scale(scores, total, k=8)
 
 
-def delta_scores(
-    data,
-    min_value,
-    max_value
-):
-    scores = empty_scores(
-        min_value,
-        max_value
-    )
+def delta_scores(data, min_value, max_value):
+    scores = {
+        value: 0
+        for value in range(min_value, max_value + 1)
+    }
 
     if len(data) < 3:
         return scores
 
     deltas = [
         data[i] - data[i - 1]
-        for i in range(
-            1,
-            len(data)
-        )
+        for i in range(1, len(data))
     ]
 
-    recent = deltas[-7:]
+    recent = deltas[-5:]
 
-    ordered = sorted(
-        recent
-    )
+    avg_delta = mean(recent)
 
-    if len(ordered) % 2:
-        center = ordered[
-            len(ordered) // 2
-        ]
-    else:
-        middle = len(ordered) // 2
-
-        center = (
-            ordered[middle - 1]
-            +
-            ordered[middle]
-        ) / 2
-
-    predicted = (
-        data[-1]
-        +
-        center
-    )
+    predicted = data[-1] + avg_delta
 
     for value in scores:
+        distance = abs(value - predicted)
 
-        distance = abs(
-            value - predicted
-        )
-
-        scores[value] = (
-            1.0
-            /
-            (1.0 + distance)
-        )
+        scores[value] = 1 / (1 + distance)
 
     return normalize(scores)
 
 
-def neighbor_scores(
-    data,
-    min_value,
-    max_value
-):
-    scores = empty_scores(
-        min_value,
-        max_value
-    )
+def learning_scores(state, min_value, max_value):
+    scores = {
+        value: 0
+        for value in range(min_value, max_value + 1)
+    }
 
-    if len(data) < 2:
-        return scores
-
-    current = data[-1]
-
-    deltas = []
-
-    for i in range(
-        len(data) - 2,
-        -1,
-        -1
-    ):
-        if data[i] == current:
-            deltas.append(
-                data[i + 1] - current
-            )
-
-        if len(deltas) >= 20:
-            break
-
-    if not deltas:
-        return scores
-
-    center = sorted(
-        deltas
-    )[len(deltas) // 2]
-
-    predicted = (
-        current
-        +
-        center
-    )
-
-    for value in scores:
-
-        distance = abs(
-            value - predicted
-        )
-
-        scores[value] = (
-            1.0
-            /
-            (1.0 + distance)
-        )
-
-    return normalize(scores)
-
-
-def learning_scores(
-    state,
-    min_value,
-    max_value
-):
-    scores = empty_scores(
-        min_value,
-        max_value
-    )
-
-    history = state.get(
-        'history',
-        []
-    )
+    history = state.get("history", [])
 
     if not history:
         return scores
 
     correct = Counter()
-    attempts = Counter()
+    total = Counter()
 
     for item in history:
-
-        prediction = item.get(
-            'prediction'
-        )
-
-        actual = item.get(
-            'actual'
-        )
+        prediction = item.get("prediction")
+        actual = item.get("actual")
 
         if prediction is None:
             continue
 
-        if not (
-            min_value
-            <= prediction
-            <= max_value
-        ):
-            continue
-
-        attempts[prediction] += 1
+        total[prediction] += 1
 
         if prediction == actual:
             correct[prediction] += 1
 
     for value in scores:
-
-        scores[value] = (
-            correct[value] + 1.0
-        ) / (
-            attempts[value] + 2.0
-        )
+        if total[value]:
+            scores[value] = (
+                correct[value] /
+                total[value]
+            )
 
     return normalize(scores)
