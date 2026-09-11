@@ -22,8 +22,6 @@ def get_weights(state, min_value, max_value):
     data = state.get("data", [])
 
     if len(data) < MIN_BACKTEST_POINTS:
-        # Belum cukup data buat backtest yang bisa dipercaya --
-        # pakai default sampai histori cukup panjang.
         weights = dict(DEFAULT_WEIGHTS)
     else:
         tuned_at = state.get("tuned_at_len", -RETUNE_INTERVAL)
@@ -34,26 +32,16 @@ def get_weights(state, min_value, max_value):
         )
 
         if needs_retune:
-            # Retune tiap RETUNE_INTERVAL data baru, bukan tiap
-            # tebakan, biar tetap ringan walau histori makin panjang.
             state["tuned_weights"] = tune_weights(
                 data, min_value, max_value
             )
             state["tuned_at_len"] = len(data)
 
-            # Laporan sanity-check: algoritma vs baseline modus.
             state["last_tune_report"] = tuning_report(
                 data, state["tuned_weights"], min_value, max_value
             )
 
         weights = dict(state["tuned_weights"])
-
-    # "learning" dulu di-hardcode 2.0 (dikali faktor akurasi) di
-    # luar sini, jadi nggak pernah lolos validasi backtest kayak
-    # metode lain -- itu salah satu penyebab mesin kebiasaan
-    # nebak nilai yang sama terus. Sekarang "learning" adalah
-    # entri biasa di DEFAULT_WEIGHTS / tuned_weights, jadi
-    # bobotnya dites & divalidasi backtest bareng 7 metode lain.
 
     return weights
 
@@ -163,16 +151,23 @@ def confidence(ranking):
     )
 
 
-def show_prediction(state, ranking):
-    print()
-    print("=" * 65)
-    print(" PREDICTION ENGINE")
+def show_prediction(state, ranking, round_number=None):
     print("=" * 65)
 
-    print("\nData tersimpan:")
-    print(state["data"])
+    header = " PREDICTION ENGINE"
 
-    print("\nTOP PREDICTION")
+    if round_number is not None:
+        header += f" — Ronde ke-{round_number}"
+
+    print(header)
+    print("=" * 65)
+
+    data = state["data"]
+
+    print(f"\nData historis ({len(data)} poin):")
+    print(data)
+
+    print("\nTEBAKAN ANGKA")
     print("-" * 65)
 
     for i, (value, score) in enumerate(
@@ -181,7 +176,7 @@ def show_prediction(state, ranking):
     ):
         print(
             f"{i:2}. "
-            f"Nilai {value:2} "
+            f"Nilai {value:2}   "
             f"Score {score:.6f}"
         )
 
@@ -191,14 +186,9 @@ def show_prediction(state, ranking):
     print("-" * 65)
 
     print(
-        f"TEBAKAN MESIN : {prediction}"
+        f"→ Tebakan utama : {prediction}"
+        f"   (confidence: {conf:.2f}%)"
     )
-
-    print(
-        f"CONFIDENCE     : {conf:.2f}%"
-    )
-
-    print("=" * 65)
 
     report = state.get("last_tune_report")
 
@@ -214,7 +204,6 @@ def show_prediction(state, ranking):
         if not report["algo_wins"]:
             print(
                 "⚠ Algoritma belum ngalahin baseline sederhana -- "
-                "hasil tuning saat ini mungkin belum optimal, "
-                "atau datanya belum cukup buat ada pola yang bisa "
-                "dipelajari."
+                "hasil tuning mungkin belum optimal, atau data "
+                "belum cukup buat ada pola yang bisa dipelajari."
             )
