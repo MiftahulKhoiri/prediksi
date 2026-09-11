@@ -34,6 +34,16 @@ METHOD_FUNCS = {
     "delta": delta_scores,
 }
 
+# "learning" di DEFAULT_WEIGHTS cuma relevan buat prediksi angka --
+# calculate_range_scores di bawah cuma pakai METHOD_FUNCS di atas,
+# jadi dikeluarkan biar tune_weights nggak buang waktu nuning bobot
+# yang efeknya nol buat rentang.
+RANGE_DEFAULT_WEIGHTS = {
+    key: value
+    for key, value in DEFAULT_WEIGHTS.items()
+    if key != "learning"
+}
+
 
 def to_label(value):
     return KECIL if value <= KECIL_MAX else BESAR
@@ -51,7 +61,7 @@ def get_range_weights(state):
     labels = [to_label(v) for v in data]
 
     if len(labels) < MIN_BACKTEST_POINTS:
-        return dict(DEFAULT_WEIGHTS)
+        return dict(RANGE_DEFAULT_WEIGHTS)
 
     tuned_at = state.get("range_tuned_at_len", -RETUNE_INTERVAL)
 
@@ -61,7 +71,9 @@ def get_range_weights(state):
     )
 
     if needs_retune:
-        state["range_tuned_weights"] = tune_weights(labels, 0, 1)
+        state["range_tuned_weights"] = tune_weights(
+            labels, 0, 1, base_weights=RANGE_DEFAULT_WEIGHTS
+        )
         state["range_tuned_at_len"] = len(labels)
 
     return dict(state["range_tuned_weights"])
@@ -121,7 +133,7 @@ def show_range_prediction(ranking):
     if not ranking:
         return
 
-    print("\nPREDIKSI RENTANG (BESAR / KECIL)")
+    print("\nTEBAKAN RENTANG (BESAR / KECIL)")
     print("-" * 65)
 
     for label, score in ranking:
@@ -135,7 +147,9 @@ def show_range_prediction(ranking):
 
     print("-" * 65)
 
-    print(f"TEBAKAN RENTANG : {label_name(prediction)}")
-    print(f"CONFIDENCE      : {conf:.2f}%")
+    print(
+        f"→ Tebakan utama : {label_name(prediction)}"
+        f"   (confidence: {conf:.2f}%)"
+    )
 
     print("=" * 65)
