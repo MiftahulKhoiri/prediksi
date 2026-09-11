@@ -1,3 +1,5 @@
+import os
+
 from src.storage import (
     load_state,
     save_state,
@@ -13,7 +15,8 @@ from src.prediction import (
 from src.range_prediction import (
     predict_range,
     show_range_prediction,
-    to_label
+    to_label,
+    label_name
 )
 
 from src.statistics import (
@@ -24,6 +27,10 @@ from src.statistics import (
 
 MIN_VALUE = 3
 MAX_VALUE = 18
+
+
+def clear_screen():
+    os.system("cls" if os.name == "nt" else "clear")
 
 
 def input_initial_data(state):
@@ -58,6 +65,44 @@ def input_initial_data(state):
         return False
 
 
+def show_round_result(
+    state,
+    prediction,
+    range_prediction,
+    actual,
+    correct
+):
+    print("=" * 65)
+    print(" HASIL")
+    print("=" * 65)
+
+    if correct:
+        print(
+            f"\n✓ BENAR — mesin menebak {prediction},"
+            f" aktual {actual}"
+        )
+    else:
+        print(
+            f"\n✗ SALAH — mesin: {prediction}"
+            f" | aktual: {actual}"
+        )
+
+    if range_prediction is not None:
+        actual_range = to_label(actual)
+        range_ok = range_prediction == actual_range
+        mark = "✓" if range_ok else "✗"
+
+        print(
+            f"{mark} Rentang — mesin: {label_name(range_prediction)}"
+            f" | aktual: {label_name(actual_range)}"
+        )
+
+    show_statistics(state)
+    show_range_statistics(state)
+
+    print("\n" + "=" * 65)
+
+
 def main():
     state = load_state()
 
@@ -65,7 +110,10 @@ def main():
         if not input_initial_data(state):
             return
 
+    round_number = len(state.get("history", [])) + 1
+
     while True:
+        clear_screen()
 
         ranking = predict(
             state,
@@ -75,7 +123,8 @@ def main():
 
         show_prediction(
             state,
-            ranking
+            ranking,
+            round_number
         )
 
         range_ranking = predict_range(state)
@@ -106,12 +155,14 @@ def main():
 
         except ValueError:
             print("Masukkan angka 3-18.")
+            input("\nTekan ENTER untuk coba lagi...")
             continue
 
         if not (
             MIN_VALUE <= actual <= MAX_VALUE
         ):
             print("Nilai harus 3-18.")
+            input("\nTekan ENTER untuk coba lagi...")
             continue
 
         correct = record_result(
@@ -129,26 +180,19 @@ def main():
                 actual_range
             )
 
-        if correct:
-            print(
-                f"\n✓ BENAR"
-                f" — mesin menebak {prediction}"
-            )
-        else:
-            print(
-                f"\n✗ SALAH"
-                f" — mesin: {prediction}"
-                f" | aktual: {actual}"
-            )
+        clear_screen()
 
-        show_statistics(state)
-        show_range_statistics(state)
-
-        print("\nData diperbarui.")
-        print(
-            "Mesin akan membuat "
-            "prediksi berikutnya..."
+        show_round_result(
+            state,
+            prediction,
+            range_prediction,
+            actual,
+            correct
         )
+
+        round_number += 1
+
+        input("\nTekan ENTER untuk prediksi berikutnya...")
 
 
 if __name__ == "__main__":
