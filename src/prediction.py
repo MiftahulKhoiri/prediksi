@@ -13,13 +13,13 @@ from .tuning import (
     DEFAULT_WEIGHTS,
     MIN_BACKTEST_POINTS,
     RETUNE_INTERVAL,
-    tune_weights
+    tune_weights,
+    tuning_report,
 )
 
 
 def get_weights(state, min_value, max_value):
     data = state.get("data", [])
-    history = state.get("history", [])
 
     if len(data) < MIN_BACKTEST_POINTS:
         # Belum cukup data buat backtest yang bisa dipercaya --
@@ -41,26 +41,19 @@ def get_weights(state, min_value, max_value):
             )
             state["tuned_at_len"] = len(data)
 
+            # Laporan sanity-check: algoritma vs baseline modus.
+            state["last_tune_report"] = tuning_report(
+                data, state["tuned_weights"], min_value, max_value
+            )
+
         weights = dict(state["tuned_weights"])
 
-    weights["learning"] = 2.0
-
-    if len(history) >= 5:
-        correct = 0
-        total = 0
-
-        for item in history[-50:]:
-            total += 1
-
-            if item.get("prediction") == item.get("actual"):
-                correct += 1
-
-        if total:
-            accuracy = correct / total
-
-            weights["learning"] *= (
-                0.5 + accuracy
-            )
+    # "learning" dulu di-hardcode 2.0 (dikali faktor akurasi) di
+    # luar sini, jadi nggak pernah lolos validasi backtest kayak
+    # metode lain -- itu salah satu penyebab mesin kebiasaan
+    # nebak nilai yang sama terus. Sekarang "learning" adalah
+    # entri biasa di DEFAULT_WEIGHTS / tuned_weights, jadi
+    # bobotnya dites & divalidasi backtest bareng 7 metode lain.
 
     return weights
 
@@ -117,7 +110,7 @@ def calculate_scores(
     }
 
     for method, scores in methods.items():
-        weight = weights[method]
+        weight = weights.get(method, 0.0)
 
         for value in final:
             final[value] += (
@@ -206,3 +199,22 @@ def show_prediction(state, ranking):
     )
 
     print("=" * 65)
+
+    report = state.get("last_tune_report")
+
+    if report is not None:
+        print(
+            f"\n[Cek ulang] Backtest algoritma: "
+            f"{report['algo_accuracy'] * 100:.1f}%"
+            f"  |  Baseline (modus): "
+            f"{report['baseline_accuracy'] * 100:.1f}%"
+            f"  (n={report['n']})"
+        )
+
+        if not report["algo_wins"]:
+            print(
+                "⚠ Algoritma belum ngalahin baseline sederhana -- "
+                "hasil tuning saat ini mungkin belum optimal, "
+                "atau datanya belum cukup buat ada pola yang bisa "
+                "dipelajari."
+            )
