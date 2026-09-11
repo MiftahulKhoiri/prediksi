@@ -2,7 +2,7 @@ def show_statistics(state):
     history = state.get("history", [])
 
     if not history:
-        print("\nBelum ada histori.")
+        print("\nBelum ada histori angka.")
         return
 
     total = len(history)
@@ -19,17 +19,15 @@ def show_statistics(state):
         100
     )
 
-    print()
-    print("=" * 65)
-    print(" STATISTIK MESIN")
-    print("=" * 65)
+    print("\nSTATISTIK ANGKA")
+    print("-" * 65)
 
-    print(f"Total prediksi : {total}")
-    print(f"Benar         : {correct}")
-    print(f"Salah         : {total - correct}")
-    print(f"Akurasi       : {accuracy:.2f}%")
-
-    print("=" * 65)
+    print(
+        f"Total: {total}   "
+        f"Benar: {correct}   "
+        f"Salah: {total - correct}   "
+        f"Akurasi: {accuracy:.2f}%"
+    )
 
 
 def show_range_statistics(state):
@@ -52,14 +50,12 @@ def show_range_statistics(state):
         100
     )
 
-    print()
-    print("=" * 65)
-    print(" STATISTIK RENTANG (BESAR/KECIL)")
-    print("=" * 65)
+    print("\nSTATISTIK RENTANG (BESAR/KECIL)")
+    print("-" * 65)
 
-    print(f"Total prediksi : {total}")
-    print(f"Benar         : {correct}")
-    print(f"Salah         : {total - correct}")
-    print(f"Akurasi       : {accuracy:.2f}%")
-
-    print("=" * 65)
+    print(
+        f"Total: {total}   "
+        f"Benar: {correct}   "
+        f"Salah: {total - correct}   "
+        f"Akurasi: {accuracy:.2f}%"
+    )
